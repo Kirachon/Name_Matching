@@ -14,3 +14,8 @@ sqlalchemy==2.0.23
 pymysql==1.1.0
 python-dotenv==1.0.0
 cryptography==41.0.3  # For PyMySQL secure connections
+
+# GUI dependencies
+PyQt5==5.15.9
+QDarkStyle==3.1.0
+openpyxl==3.1.2  # For Excel export
