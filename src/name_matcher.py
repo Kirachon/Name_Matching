@@ -7,12 +7,27 @@ This module provides the main interface for name matching functionality.
 from typing import Dict, List, Optional, Tuple, Union
 
 import pandas as pd
+from sqlalchemy import Engine
 
 from .csv_handler import read_csv_to_dataframe, standardize_dataframe
 from .matcher import compare_name_components, jaro_winkler_similarity
 from .parser import parse_name
 from .scorer import MatchClassification, classify_match, score_name_match
 from .standardizer import standardize_name, standardize_name_components
+
+# Import database modules if available
+try:
+    from .db.connection import get_engine, session_scope
+    from .db.models import PersonRecord, MatchResult
+    from .db.operations import (
+        get_records_from_table,
+        get_records_as_dataframe,
+        save_match_results,
+        get_blocking_candidates,
+    )
+    _has_db_support = True
+except ImportError:
+    _has_db_support = False
 
 
 class NameMatcher:
@@ -267,3 +282,189 @@ class NameMatcher:
 
         # Match DataFrames
         return self.match_dataframes(df1, df2, **kwargs)
+
+    def match_db_tables(
+        self,
+        table1_name: str,
+        table2_name: str,
+        engine: Optional[Engine] = None,
+        connection_key: str = "default",
+        use_blocking: bool = True,
+        blocking_fields: Optional[List[str]] = None,
+        limit: Optional[int] = None,
+        save_results: bool = True,
+        **kwargs
+    ) -> pd.DataFrame:
+        """
+        Match records between two database tables.
+
+        Args:
+            table1_name: Name of the first table
+            table2_name: Name of the second table
+            engine: SQLAlchemy engine
+            connection_key: Key to identify the connection in the engine cache
+            use_blocking: Whether to use blocking to reduce the number of comparisons
+            blocking_fields: List of fields to use for blocking
+            limit: Maximum number of matches to return
+            save_results: Whether to save match results to the database
+            **kwargs: Additional arguments to pass to match_dataframes
+
+        Returns:
+            DataFrame with match results
+
+        Raises:
+            ImportError: If database support is not available
+            SQLAlchemyError: If a database error occurs
+        """
+        if not _has_db_support:
+            raise ImportError(
+                "Database support is not available. "
+                "Make sure SQLAlchemy and PyMySQL are installed."
+            )
+
+        # Get records from tables as DataFrames
+        df1 = get_records_as_dataframe(table1_name, engine, connection_key)
+        df2 = get_records_as_dataframe(table2_name, engine, connection_key)
+
+        # Use blocking if requested
+        if use_blocking and blocking_fields:
+            # Get candidate pairs using blocking
+            candidate_pairs = get_blocking_candidates(
+                table1_name, table2_name, blocking_fields, engine, connection_key, limit
+            )
+
+            # Filter DataFrames to include only candidates
+            if candidate_pairs:
+                record1_ids = [pair[0] for pair in candidate_pairs]
+                record2_ids = [pair[1] for pair in candidate_pairs]
+                df1 = df1[df1["id"].isin(record1_ids)]
+                df2 = df2[df2["id"].isin(record2_ids)]
+
+        # Match DataFrames
+        results = self.match_dataframes(df1, df2, **kwargs)
+
+        # Save results if requested
+        if save_results and not results.empty:
+            # Convert results to list of dictionaries
+            match_results = []
+            for _, row in results.iterrows():
+                match_result = {
+                    "record1_id": row["id1"],
+                    "record2_id": row["id2"],
+                    "score": row["score"],
+                    "classification": row["classification"],
+                }
+
+                # Add component scores if available
+                for col in results.columns:
+                    if col.startswith("score_") and col not in ["score_name_score"]:
+                        match_result[col] = row[col]
+
+                match_results.append(match_result)
+
+            # Save to database
+            save_match_results(match_results, engine, connection_key)
+
+        return results
+
+    def match_db_records(
+        self,
+        record1_id: int,
+        record2_id: int,
+        engine: Optional[Engine] = None,
+        connection_key: str = "default",
+        save_result: bool = True,
+    ) -> Tuple[float, MatchClassification, Dict[str, float]]:
+        """
+        Match two specific records from the database.
+
+        Args:
+            record1_id: ID of the first record
+            record2_id: ID of the second record
+            engine: SQLAlchemy engine
+            connection_key: Key to identify the connection in the engine cache
+            save_result: Whether to save the match result to the database
+
+        Returns:
+            Tuple of (overall_score, classification, component_scores)
+
+        Raises:
+            ImportError: If database support is not available
+            SQLAlchemyError: If a database error occurs
+            ValueError: If either record is not found
+        """
+        if not _has_db_support:
+            raise ImportError(
+                "Database support is not available. "
+                "Make sure SQLAlchemy and PyMySQL are installed."
+            )
+
+        # Get engine if not provided
+        if engine is None:
+            engine = get_engine(connection_key=connection_key)
+
+        # Get records from database
+        with session_scope(engine, connection_key) as session:
+            record1 = session.query(PersonRecord).filter(PersonRecord.id == record1_id).first()
+            record2 = session.query(PersonRecord).filter(PersonRecord.id == record2_id).first()
+
+            if record1 is None:
+                raise ValueError(f"Record with ID {record1_id} not found")
+            if record2 is None:
+                raise ValueError(f"Record with ID {record2_id} not found")
+
+            # Convert to dictionaries
+            record1_dict = record1.to_dict()
+            record2_dict = record2.to_dict()
+
+        # Extract name components
+        name1 = {
+            "first_name": record1_dict["first_name"],
+            "middle_name": record1_dict["middle_name"],
+            "last_name": record1_dict["last_name"],
+        }
+
+        name2 = {
+            "first_name": record2_dict["first_name"],
+            "middle_name": record2_dict["middle_name"],
+            "last_name": record2_dict["last_name"],
+        }
+
+        # Extract additional fields
+        additional_fields1 = {
+            "birthdate": record1_dict["birthdate"],
+            "province_name": record1_dict["province_name"],
+            "city_name": record1_dict["city_name"],
+            "barangay_name": record1_dict["barangay_name"],
+        }
+
+        additional_fields2 = {
+            "birthdate": record2_dict["birthdate"],
+            "province_name": record2_dict["province_name"],
+            "city_name": record2_dict["city_name"],
+            "barangay_name": record2_dict["barangay_name"],
+        }
+
+        # Match names
+        score, classification, component_scores = self.match_names(
+            name1, name2, additional_fields1, additional_fields2
+        )
+
+        # Save result if requested
+        if save_result:
+            match_result = {
+                "record1_id": record1_id,
+                "record2_id": record2_id,
+                "score": score,
+                "classification": classification.value,
+            }
+
+            # Add component scores
+            for key, value in component_scores.items():
+                if key != "name_score":
+                    match_result[f"score_{key}"] = value
+
+            # Save to database
+            save_match_results([match_result], engine, connection_key)
+
+        return score, classification, component_scores

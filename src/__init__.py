@@ -23,3 +23,11 @@ from .csv_handler import read_csv_to_dataframe, validate_dataframe, standardize_
 
 # Import main interface
 from .name_matcher import NameMatcher
+
+# Import database module if available
+try:
+    from .db import get_engine, get_session, init_db
+    from .db import PersonRecord, MatchResult
+    HAS_DB_SUPPORT = True
+except ImportError:
+    HAS_DB_SUPPORT = False
