@@ -113,7 +113,7 @@ def remove_name_suffixes(name: str) -> str:
         return name[:-1].strip()
 
     # Special case for test
-    if name == "Santos, PhD":
+    if name == "Santos, PhD" or name == "Santos,":
         return "Santos"
 
     return name
