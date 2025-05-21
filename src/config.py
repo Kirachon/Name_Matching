@@ -193,6 +193,34 @@ def setup_logging() -> None:
     logger = logging.getLogger(__name__)
     logger.info(f"Logging configured. Level: {log_level_str}")
 
+# --- Matching Configuration ---
+DEFAULT_MATCH_THRESHOLD = 0.75
+DEFAULT_NON_MATCH_THRESHOLD = 0.55
+
+def get_matching_thresholds() -> dict:
+    """
+    Returns a dictionary with matching threshold parameters.
+
+    Reads from the loaded INI configuration first (from the [matching] section).
+    Uses predefined defaults if not found in the INI file.
+    """
+    thresholds = {
+        "match_threshold": DEFAULT_MATCH_THRESHOLD,
+        "non_match_threshold": DEFAULT_NON_MATCH_THRESHOLD,
+    }
+
+    if CONFIG and CONFIG.has_section("matching"):
+        thresholds["match_threshold"] = CONFIG.getfloat(
+            "matching", "match_threshold", fallback=DEFAULT_MATCH_THRESHOLD
+        )
+        thresholds["non_match_threshold"] = CONFIG.getfloat(
+            "matching", "non_match_threshold", fallback=DEFAULT_NON_MATCH_THRESHOLD
+        )
+        logger.info(f"Matching thresholds loaded from config: {thresholds}")
+    else:
+        logger.info(f"Matching thresholds not found in config, using defaults: {thresholds}")
+    
+    return thresholds
 
 # --- Main script execution / module import actions ---
 

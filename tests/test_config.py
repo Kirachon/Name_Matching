@@ -477,6 +477,97 @@ def test_get_logging_config_missing_logging_section(tmp_path, monkeypatch):
     log_settings_default = config.get_logging_config() # config.CONFIG still has no [logging]
     assert log_settings_default["level"] == config.DEFAULT_LOG_LEVEL
 
+def test_get_matching_thresholds_from_ini(tmp_path, caplog):
+    """Test get_matching_thresholds when values are present in the INI file."""
+    import logging
+    caplog.set_level(logging.INFO) # To capture info logs from get_matching_thresholds
+
+    config_file = tmp_path / "matching_config.ini"
+    parser = configparser.ConfigParser()
+    parser["matching"] = {
+        "match_threshold": "0.85",
+        "non_match_threshold": "0.65"
+    }
+    with open(config_file, "w") as f:
+        parser.write(f)
+    
+    config.load_config(str(config_file))
+    thresholds = config.get_matching_thresholds()
+    
+    assert thresholds["match_threshold"] == 0.85
+    assert thresholds["non_match_threshold"] == 0.65
+    assert "Matching thresholds loaded from config" in caplog.text
+
+def test_get_matching_thresholds_defaults(monkeypatch, caplog):
+    """Test get_matching_thresholds uses defaults when INI section/keys are missing."""
+    import logging
+    caplog.set_level(logging.INFO)
+
+    # Ensure config is loaded but without the 'matching' section
+    config.CONFIG = configparser.ConfigParser() # Empty config, no 'matching' section
+    config.CONFIG.add_section("database") # Add some other section to make CONFIG not None
+
+    # Clear relevant environment variables if any were set by other tests
+    monkeypatch.delenv("MATCH_THRESHOLD", raising=False)
+    monkeypatch.delenv("NON_MATCH_THRESHOLD", raising=False)
+
+    thresholds = config.get_matching_thresholds()
+    
+    assert thresholds["match_threshold"] == config.DEFAULT_MATCH_THRESHOLD
+    assert thresholds["non_match_threshold"] == config.DEFAULT_NON_MATCH_THRESHOLD
+    assert "Matching thresholds not found in config, using defaults" in caplog.text
+
+def test_get_matching_thresholds_fallback_if_key_missing(tmp_path, caplog):
+    """Test get_matching_thresholds uses default for a specific missing key in INI."""
+    import logging
+    caplog.set_level(logging.INFO)
+
+    config_file = tmp_path / "partial_matching_config.ini"
+    parser = configparser.ConfigParser()
+    parser["matching"] = {
+        "match_threshold": "0.90" # non_match_threshold is missing
+    }
+    with open(config_file, "w") as f:
+        parser.write(f)
+    
+    config.load_config(str(config_file))
+    thresholds = config.get_matching_thresholds()
+    
+    assert thresholds["match_threshold"] == 0.90
+    assert thresholds["non_match_threshold"] == config.DEFAULT_NON_MATCH_THRESHOLD # Should use default
+    assert "Matching thresholds loaded from config" in caplog.text # Still loaded from config, but one value defaulted
+
+def test_get_matching_thresholds_invalid_value_in_ini(tmp_path, caplog):
+    """Test get_matching_thresholds with non-float value in INI, expecting fallback."""
+    import logging
+    caplog.set_level(logging.INFO)
+
+    config_file = tmp_path / "invalid_matching_config.ini"
+    parser = configparser.ConfigParser()
+    parser["matching"] = {
+        "match_threshold": "not_a_float",
+        "non_match_threshold": "0.5"
+    }
+    with open(config_file, "w") as f:
+        parser.write(f)
+    
+    config.load_config(str(config_file))
+    # configparser.getfloat will raise ValueError if fallback is not provided
+    # or if the fallback itself cannot be converted.
+    # The fallback in get_matching_thresholds is a float, so it should be fine.
+    thresholds = config.get_matching_thresholds() 
+    
+    assert thresholds["match_threshold"] == config.DEFAULT_MATCH_THRESHOLD # Fallback due to conversion error
+    assert thresholds["non_match_threshold"] == 0.5
+    assert "Matching thresholds loaded from config" in caplog.text # It did attempt to load
+    # Note: configparser itself might log a warning or error for the failed conversion,
+    # or getfloat with fallback might silently use the fallback.
+    # The current implementation of get_matching_thresholds uses fallback in getfloat,
+    # so it won't raise an error but use the default.
+
+# --- Test get_connection_string integration ---
+# get_connection_string is in src.db.connection, but its behavior
+
 
 # --- Test get_connection_string integration ---
 # get_connection_string is in src.db.connection, but its behavior

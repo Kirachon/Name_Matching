@@ -34,3 +34,6 @@ venv.bak/
 .vscode/
 *.swp
 *.swo
+
+# Output directories
+output/
