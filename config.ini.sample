@@ -1,0 +1,18 @@
+[database]
+host = localhost
+port = 5432
+user = your_db_user
+password = your_db_password
+database = your_db_name
+use_ssl = false
+
+[logging]
+# Log level: CRITICAL, ERROR, WARNING, INFO, DEBUG
+level = INFO
+# Optional: Specify a log file path. If commented out or empty, logs go to console.
+# file = /path/to/your/app.log
+
+# Other application settings can be added below
+# For example:
+# [application]
+# debug = true
