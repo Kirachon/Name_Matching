@@ -81,6 +81,65 @@ def get_db_config() -> dict:
 
     return db_config
 
+def get_gpu_config() -> dict:
+    """
+    Returns a dictionary with GPU acceleration parameters.
+
+    Tries to read from the loaded INI configuration first.
+    If not available, falls back to environment variables.
+    If neither is available, uses default values.
+
+    Returns:
+        dict: GPU configuration parameters
+    """
+    gpu_config = {
+        "enabled": True,
+        "framework": None,  # Auto-select
+        "device_id": 0,
+        "batch_size": 1000,
+        "memory_limit_gb": 4.0,
+        "fallback_threshold": 10000
+    }
+
+    # Try to read from INI configuration first
+    if CONFIG and CONFIG.has_section('gpu'):
+        print("Reading GPU config from INI file...")
+
+        if CONFIG.has_option('gpu', 'enabled'):
+            gpu_config["enabled"] = CONFIG.getboolean('gpu', 'enabled')
+        if CONFIG.has_option('gpu', 'framework'):
+            framework = CONFIG.get('gpu', 'framework')
+            gpu_config["framework"] = framework if framework.lower() != 'none' else None
+        if CONFIG.has_option('gpu', 'device_id'):
+            gpu_config["device_id"] = CONFIG.getint('gpu', 'device_id')
+        if CONFIG.has_option('gpu', 'batch_size'):
+            gpu_config["batch_size"] = CONFIG.getint('gpu', 'batch_size')
+        if CONFIG.has_option('gpu', 'memory_limit_gb'):
+            gpu_config["memory_limit_gb"] = CONFIG.getfloat('gpu', 'memory_limit_gb')
+        if CONFIG.has_option('gpu', 'fallback_threshold'):
+            gpu_config["fallback_threshold"] = CONFIG.getint('gpu', 'fallback_threshold')
+    else:
+        print("No [gpu] section in INI or INI file not loaded. Checking environment variables for GPU config...")
+
+        # Fallback to environment variables
+        if os.getenv("GPU_ENABLED"):
+            gpu_config["enabled"] = os.getenv("GPU_ENABLED").lower() in ['true', '1', 'yes']
+        if os.getenv("GPU_FRAMEWORK"):
+            framework = os.getenv("GPU_FRAMEWORK")
+            gpu_config["framework"] = framework if framework.lower() != 'none' else None
+        if os.getenv("GPU_DEVICE_ID"):
+            gpu_config["device_id"] = int(os.getenv("GPU_DEVICE_ID"))
+        if os.getenv("GPU_BATCH_SIZE"):
+            gpu_config["batch_size"] = int(os.getenv("GPU_BATCH_SIZE"))
+        if os.getenv("GPU_MEMORY_LIMIT_GB"):
+            gpu_config["memory_limit_gb"] = float(os.getenv("GPU_MEMORY_LIMIT_GB"))
+        if os.getenv("GPU_FALLBACK_THRESHOLD"):
+            gpu_config["fallback_threshold"] = int(os.getenv("GPU_FALLBACK_THRESHOLD"))
+
+        print("No [gpu] section in INI or INI file not loaded. Using default GPU config with environment variable overrides.")
+
+    return gpu_config
+
 # Attempt to load configuration when the module is imported.
 # This makes the configuration available immediately if config.ini exists in the default location.
 # The application can call load_config() explicitly with a different path if needed.
