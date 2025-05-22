@@ -105,7 +105,7 @@ def test_calculate_metrics_mixed_scenario():
     # TP = 3 (0.95, 0.80, 0.78)
     # FP = 1 (0.85)
     # FN = 2 (0.60, 0.50)
-    
+
     metrics = calculate_metrics(labeled_results, match_threshold=0.75, non_match_threshold=0.55)
     expected_precision = precision(3, 1) # 3 / (3+1) = 0.75
     expected_recall = recall(3, 2)    # 3 / (3+2) = 0.6
@@ -125,8 +125,8 @@ def test_calculate_metrics_key_names():
         {"s": 0.7, "actual": "non-match"},
     ]
     metrics = calculate_metrics(
-        labeled_results, 
-        match_threshold=0.8, 
+        labeled_results,
+        match_threshold=0.8,
         non_match_threshold=0.6,
         true_label_key="actual",
         predicted_score_key="s"
@@ -151,7 +151,7 @@ def test_calculate_metrics_missing_keys(caplog):
         {"predicted_score": 0.8, "true_label": "match"} # Valid
     ]
     metrics = calculate_metrics(labeled_results, match_threshold=0.7, non_match_threshold=0.5)
-    
+
     assert "Skipping result due to missing score or true_label" in caplog.text
     # Only one valid record
     assert metrics["true_positives"] == 1
@@ -171,7 +171,7 @@ def test_calculate_metrics_non_match_threshold_impact():
         {"predicted_score": 0.7, "true_label": "match"},     # FN if match_threshold=0.8, TP if match_threshold=0.6
         {"predicted_score": 0.65, "true_label": "non-match"},# TN if match_threshold=0.8, FP if match_threshold=0.6
     ]
-    
+
     # Scenario 1: match_threshold = 0.8
     # (0.7, match) -> FN
     # (0.65, non-match) -> TN
@@ -193,5 +193,3 @@ def test_calculate_metrics_non_match_threshold_impact():
     assert metrics2["precision"] == 0.5
     assert metrics2["recall"] == 1.0
     assert metrics2["f1_score"] == pytest.approx(2 * (0.5 * 1.0) / (0.5 + 1.0))
-
-```
