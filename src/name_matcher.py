@@ -22,6 +22,7 @@ from .scorer import MatchClassification, classify_match, score_name_match
 from .standardizer import standardize_name, standardize_name_components
 from .config import get_matching_thresholds # Import the new function
 import logging # Ensure logging is imported
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +41,23 @@ except ImportError as e:
     logger.warning(f"Database support not available: {e}")
     _has_db_support = False
 
+# Import GPU acceleration if available
+try:
+    from .gpu_acceleration import GPUNameMatcher, get_gpu_status, configure_gpu
+    from .config import get_gpu_config
+    _has_gpu_support = True
+
+    # Configure GPU from config file
+    try:
+        gpu_config = get_gpu_config()
+        configure_gpu(gpu_config)
+        logger.info(f"GPU configuration loaded: {gpu_config}")
+    except Exception as e:
+        logger.warning(f"Failed to load GPU configuration: {e}")
+except ImportError as e:
+    logger.warning(f"GPU acceleration not available: {e}")
+    _has_gpu_support = False
+
 
 class NameMatcher:
     """
@@ -52,7 +70,9 @@ class NameMatcher:
         non_match_threshold: float = 0.55,  # Lowered from 0.65
         name_weights: Dict[str, float] = None,
         additional_field_weights: Dict[str, float] = None,
-        base_component_similarity_func = None
+        base_component_similarity_func = None,
+        enable_gpu: bool = None,
+        gpu_framework: str = None
     ):
         """
         Initialize the NameMatcher.
@@ -64,6 +84,8 @@ class NameMatcher:
             additional_field_weights: Dictionary with weights for additional fields
             base_component_similarity_func: The similarity function to use for comparing individual name components.
                                             Defaults to jaro_winkler_similarity.
+            enable_gpu: Whether to enable GPU acceleration. If None, uses config setting.
+            gpu_framework: Preferred GPU framework ('cupy', 'torch', 'numba'). If None, auto-selects.
         """
         config_thresholds = get_matching_thresholds()
 
@@ -83,6 +105,26 @@ class NameMatcher:
             "birthdate": 0.3,
             "geography": 0.3
         }
+
+        # Initialize GPU acceleration
+        self.gpu_matcher = None
+        if _has_gpu_support:
+            try:
+                # Use provided settings or fall back to config
+                if enable_gpu is None:
+                    gpu_config = get_gpu_config()
+                    enable_gpu = gpu_config.get('enabled', True)
+
+                if enable_gpu:
+                    self.gpu_matcher = GPUNameMatcher(enable_gpu=True, framework=gpu_framework)
+                    logger.info(f"GPU acceleration enabled: {self.gpu_matcher.get_gpu_info()}")
+                else:
+                    logger.info("GPU acceleration disabled by configuration")
+            except Exception as e:
+                logger.warning(f"Failed to initialize GPU acceleration: {e}")
+                self.gpu_matcher = None
+        else:
+            logger.info("GPU acceleration not available")
 
     def match_names(
         self,
@@ -334,6 +376,122 @@ class NameMatcher:
 
         # Match DataFrames
         return self.match_dataframes(df1, df2, **kwargs)
+
+    def match_dataframes_gpu(
+        self,
+        df1: pd.DataFrame,
+        df2: pd.DataFrame,
+        name_columns: Dict[str, str] = None,
+        algorithm: str = 'jaro_winkler',
+        threshold: float = None,
+        batch_size: int = None
+    ) -> pd.DataFrame:
+        """
+        GPU-accelerated batch matching between two DataFrames.
+
+        This method uses GPU acceleration for similarity calculations when available,
+        providing significant speedup for large datasets.
+
+        Args:
+            df1: First DataFrame
+            df2: Second DataFrame
+            name_columns: Dictionary mapping DataFrame columns to name components
+            algorithm: Similarity algorithm ('jaro_winkler', 'levenshtein')
+            threshold: Minimum similarity threshold for matches
+            batch_size: Batch size for GPU processing
+
+        Returns:
+            DataFrame with match results
+        """
+        if not self.gpu_matcher or not self.gpu_matcher.enable_gpu:
+            logger.info("GPU not available, falling back to CPU implementation")
+            return self.match_dataframes(df1, df2, name_columns)
+
+        if threshold is None:
+            threshold = self.non_match_threshold
+
+        if name_columns is None:
+            name_columns = {
+                "first_name": "first_name",
+                "middle_name_last_name": "middle_name_last_name"
+            }
+
+        logger.info(f"Starting GPU-accelerated matching: {len(df1)} × {len(df2)} = {len(df1) * len(df2):,} comparisons")
+
+        try:
+            # Extract names from DataFrames
+            names1 = []
+            names2 = []
+
+            for _, row in df1.iterrows():
+                # Construct full name from components
+                name_parts = []
+                for component, column in name_columns.items():
+                    if column in row and pd.notna(row[column]):
+                        name_parts.append(str(row[column]).strip())
+                full_name = ' '.join(name_parts)
+                names1.append(full_name)
+
+            for _, row in df2.iterrows():
+                # Construct full name from components
+                name_parts = []
+                for component, column in name_columns.items():
+                    if column in row and pd.notna(row[column]):
+                        name_parts.append(str(row[column]).strip())
+                full_name = ' '.join(name_parts)
+                names2.append(full_name)
+
+            # GPU-accelerated similarity calculation
+            start_time = time.time()
+            similarity_matrix = self.gpu_matcher.batch_similarity_matrix(
+                names1, names2, algorithm=algorithm
+            )
+            gpu_time = time.time() - start_time
+
+            total_comparisons = len(names1) * len(names2)
+            logger.info(f"GPU similarity calculation: {total_comparisons:,} comparisons in {gpu_time:.4f}s "
+                       f"({total_comparisons/gpu_time:.0f} comp/sec)")
+
+            # Extract matches above threshold
+            results = []
+            matches_found = 0
+
+            for i in range(len(names1)):
+                for j in range(len(names2)):
+                    score = similarity_matrix[i, j]
+                    if score >= threshold:
+                        # Get IDs
+                        id1 = df1.iloc[i].get('hh_id', i)
+                        id2 = df2.iloc[j].get('hh_id', j)
+
+                        # Classify match
+                        if score >= self.match_threshold:
+                            classification = 'MATCH'
+                        elif score >= self.non_match_threshold:
+                            classification = 'POSSIBLE_MATCH'
+                        else:
+                            classification = 'NON_MATCH'
+
+                        results.append({
+                            'id1': id1,
+                            'id2': id2,
+                            'score': float(score),
+                            'classification': classification,
+                            'algorithm': algorithm,
+                            'name1': names1[i],
+                            'name2': names2[j]
+                        })
+                        matches_found += 1
+
+            logger.info(f"GPU matching completed: {matches_found} matches found above threshold {threshold}")
+
+            return pd.DataFrame(results) if results else pd.DataFrame(columns=[
+                'id1', 'id2', 'score', 'classification', 'algorithm', 'name1', 'name2'
+            ])
+
+        except Exception as e:
+            logger.error(f"GPU matching failed: {e}, falling back to CPU")
+            return self.match_dataframes(df1, df2, name_columns)
 
     def match_db_tables(
         self,
