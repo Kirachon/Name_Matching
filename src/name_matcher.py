@@ -10,10 +10,20 @@ import pandas as pd
 from sqlalchemy import Engine
 
 from .csv_handler import read_csv_to_dataframe, standardize_dataframe
-from .matcher import compare_name_components, jaro_winkler_similarity
-from .parser import parse_name
+from .matcher import (
+    compare_name_components,
+    jaro_winkler_similarity,
+    damerau_levenshtein_similarity,
+    monge_elkan_similarity,
+)
+from .parser import parse_name, tokenize_name
+from .matcher import jaro_winkler_similarity as default_similarity_func # for default value
 from .scorer import MatchClassification, classify_match, score_name_match
 from .standardizer import standardize_name, standardize_name_components
+from .config import get_matching_thresholds # Import the new function
+import logging # Ensure logging is imported
+
+logger = logging.getLogger(__name__)
 
 # Import database modules if available
 try:
@@ -40,19 +50,28 @@ class NameMatcher:
         match_threshold: float = 0.75,  # Lowered from 0.85
         non_match_threshold: float = 0.55,  # Lowered from 0.65
         name_weights: Dict[str, float] = None,
-        additional_field_weights: Dict[str, float] = None
+        additional_field_weights: Dict[str, float] = None,
+        base_component_similarity_func = None
     ):
         """
         Initialize the NameMatcher.
 
         Args:
-            match_threshold: Threshold for classifying as a match
-            non_match_threshold: Threshold for classifying as a non-match
+            match_threshold: Threshold for classifying as a match. If None, loads from config.
+            non_match_threshold: Threshold for classifying as a non-match. If None, loads from config.
             name_weights: Dictionary with weights for name components
             additional_field_weights: Dictionary with weights for additional fields
+            base_component_similarity_func: The similarity function to use for comparing individual name components.
+                                            Defaults to jaro_winkler_similarity.
         """
-        self.match_threshold = match_threshold
-        self.non_match_threshold = non_match_threshold
+        config_thresholds = get_matching_thresholds()
+        
+        self.match_threshold = match_threshold if match_threshold is not None else config_thresholds["match_threshold"]
+        self.non_match_threshold = non_match_threshold if non_match_threshold is not None else config_thresholds["non_match_threshold"]
+        
+        logger.info(f"NameMatcher initialized with match_threshold: {self.match_threshold}, non_match_threshold: {self.non_match_threshold}")
+
+        self.base_component_similarity_func = base_component_similarity_func or default_similarity_func
         self.name_weights = name_weights or {
             "first_name": 0.4,
             "middle_name": 0.2,
@@ -102,9 +121,41 @@ class NameMatcher:
         name2_std = standardize_name_components(name2_components)
 
         # Compare name components
-        component_scores = compare_name_components(name1_std, name2_std)
+        component_scores = compare_name_components(name1_std, name2_std, similarity_function=self.base_component_similarity_func)
+        
+        # Add Monge-Elkan score using Damerau-Levenshtein as secondary
+        # This requires tokenizing the full standardized names
+        # For simplicity, we'll re-standardize and tokenize the full names here.
+        # A more optimized approach might pass tokenized names around.
+        
+        # Reconstruct full names for Monge-Elkan tokenization
+        # This is a simplified approach; ideally, standardization and tokenization
+        # would be more streamlined if Monge-Elkan is a primary strategy.
+        full_name1_str = " ".join(filter(None, [name1_std.get("first_name", ""), name1_std.get("middle_name", ""), name1_std.get("last_name", "")]))
+        full_name2_str = " ".join(filter(None, [name2_std.get("first_name", ""), name2_std.get("middle_name", ""), name2_std.get("last_name", "")]))
 
-        # Calculate name score
+        name1_tokens = tokenize_name(full_name1_str)
+        name2_tokens = tokenize_name(full_name2_str)
+
+        if name1_tokens and name2_tokens: # Ensure tokens are not empty
+            component_scores["monge_elkan_dl"] = monge_elkan_similarity(
+                name1_tokens, 
+                name2_tokens, 
+                damerau_levenshtein_similarity
+            )
+            component_scores["monge_elkan_jw"] = monge_elkan_similarity(
+                name1_tokens,
+                name2_tokens,
+                jaro_winkler_similarity
+            )
+        else:
+            component_scores["monge_elkan_dl"] = 0.0
+            component_scores["monge_elkan_jw"] = 0.0
+
+
+        # Calculate name score using existing component_scores (which uses Jaro-Winkler by default)
+        # The new Monge-Elkan scores are available in component_scores but not directly used in the default name_score calculation yet.
+        # This would require changing score_name_match or the weights. For now, it's just added as an additional metric.
         name_score = score_name_match(component_scores, self.name_weights)
 
         # Calculate additional field scores if provided

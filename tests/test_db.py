@@ -398,3 +398,120 @@ def test_name_matcher_db_integration(in_memory_db, sample_records, table1_name, 
                     table1_name, table2_name, engine=engine, save_results=False
                 )
                 assert len(results) > 0
+
+# --- Logging Tests for Database Modules ---
+
+def test_get_engine_logging(caplog):
+    """Test logging in get_engine function."""
+    import logging
+    from src.db import connection # To access _engines cache for reset
+
+    caplog.set_level(logging.DEBUG, logger="src.db.connection")
+
+    # Clear engine cache for a clean test
+    connection._engines.clear()
+    
+    # Test new engine creation logging (actual creation is mocked by default in some tests, but here we want it to run)
+    # We need a scenario where create_engine is actually called.
+    # The existing test_get_engine mocks create_engine. We need a version that doesn't.
+    # For this, we can call get_engine directly without the specific mock_create_engine patch.
+    # This will use the actual create_engine, so it might try to connect if not careful.
+    # However, get_connection_string is already tested, and it forms a default mysql string.
+    # The create_engine itself might fail if mysql is not running, but the log for conn_str should appear.
+    
+    # Let's patch create_engine just to prevent it from actually running, but allow logging before it.
+    with patch("src.db.connection.create_engine") as mock_create_engine_for_log:
+        mock_create_engine_for_log.return_value = MagicMock() # Return a dummy engine
+        get_engine(connection_key="log_test_engine", db_name="log_db") # Use a unique key
+
+    assert "Creating new engine for key: log_test_engine" in caplog.text
+    assert "Connection string for log_test_engine:" in caplog.text # Checks for the log about conn string
+    assert "SQLAlchemy engine created for key 'log_test_engine'" in caplog.text # Log after successful (mocked) creation
+    
+    # Test cached engine logging
+    caplog.clear()
+    get_engine(connection_key="log_test_engine") # Call again with the same key
+    assert "Returning cached engine for key: log_test_engine" in caplog.text
+    connection._engines.clear() # Clean up
+
+def test_session_scope_logging(in_memory_db, caplog):
+    """Test logging within the session_scope context manager."""
+    import logging
+    caplog.set_level(logging.DEBUG, logger="src.db.connection")
+
+    engine, _ = in_memory_db
+    
+    with session_scope(engine=engine, connection_key="log_session_test") as session:
+        # Perform a simple operation
+        session.query(PersonRecord).first()
+
+    assert "Yielding session (key: log_session_test, attempt: 1)" in caplog.text
+    assert "Session committed (key: log_session_test)" in caplog.text
+    assert "Closing session (key: log_session_test)" in caplog.text
+
+    # Test logging on operational error and retry (more complex to set up)
+    # This would require mocking session.commit() to raise OperationalError.
+    # For now, we've tested the happy path logs.
+
+def test_get_records_from_table_logging(in_memory_db, sample_records, caplog):
+    """Test logging in get_records_from_table."""
+    import logging
+    caplog.set_level(logging.INFO, logger="src.db.operations") # operations logger
+
+    engine, _ = in_memory_db
+    save_records(sample_records, "log_test_table", engine) # Populate some data
+
+    caplog.clear() # Clear logs from save_records
+    get_records_from_table("log_test_table", engine=engine, limit=1)
+
+    assert "Getting records from table: log_test_table, limit: 1" in caplog.text
+    assert "Retrieved 1 records from table log_test_table." in caplog.text
+
+
+def test_save_records_logging(in_memory_db, sample_records, caplog):
+    """Test logging in save_records."""
+    import logging
+    caplog.set_level(logging.INFO, logger="src.db.operations")
+
+    engine, _ = in_memory_db
+    
+    # Reduce sample_records to avoid very long log messages for IDs
+    records_to_save = sample_records[:1] 
+    
+    caplog.clear()
+    save_records(records_to_save, "log_save_test", engine=engine)
+    
+    assert f"Saving {len(records_to_save)} records to table: log_save_test" in caplog.text
+    assert f"Saved {len(records_to_save)} records to table log_save_test" in caplog.text # Checks for the count
+    # Also check if IDs are mentioned (e.g., "with IDs:")
+    assert "with IDs:" in caplog.text
+
+
+def test_db_operations_error_logging(in_memory_db, caplog):
+    """Test error logging in a db operation function (e.g., get_records_from_table)."""
+    import logging
+    caplog.set_level(logging.ERROR, logger="src.db.operations")
+    engine, _ = in_memory_db
+
+    # Mock session.execute to raise an error
+    with patch("src.db.operations.session_scope") as mock_session_scope:
+        # Make the session context manager raise an error or the session object itself
+        mock_session = MagicMock()
+        mock_session.execute.side_effect = Exception("Simulated DB query error") # Generic Exception for test
+        
+        # Setup mock_session_scope to yield our mock_session
+        @contextmanager
+        def cm_yielding_mock_session(*args, **kwargs):
+            try:
+                yield mock_session
+            finally:
+                pass # Simulate closing if necessary
+        
+        mock_session_scope.side_effect = cm_yielding_mock_session
+
+        with pytest.raises(Exception): # Expecting the re-raised exception
+             get_records_from_table("error_test_table", engine=engine)
+    
+    assert "Error getting records from table error_test_table: Simulated DB query error" in caplog.text
+    # The exc_info=True in logger.error should ensure stack trace is logged,
+    # but caplog.text doesn't directly show that. We trust it's passed to the logger.

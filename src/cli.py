@@ -8,11 +8,15 @@ This module provides a command-line interface for using the Name Matching librar
 import argparse
 import os
 import sys
+import logging
 from pathlib import Path
 
 import pandas as pd
 
 from src import NameMatcher, HAS_DB_SUPPORT
+
+# Setup logger for this module
+logger = logging.getLogger(__name__)
 
 # Import database modules if available
 if HAS_DB_SUPPORT:
@@ -54,23 +58,28 @@ def match_names(args):
         additional_fields2 if additional_fields2 else None,
     )
     
-    # Print results
-    print(f"Match score: {score:.4f}")
-    print(f"Classification: {classification}")
-    print("Component scores:")
-    for component, score in component_scores.items():
-        print(f"  {component}: {score:.4f}")
+    # Log results
+    logger.info(f"Match score: {score:.4f}")
+    logger.info(f"Classification: {classification}")
+    logger.info("Component scores:")
+    for component, comp_score_val in component_scores.items(): # Renamed score to avoid conflict
+        logger.info(f"  {component}: {comp_score_val:.4f}")
 
 
 def match_csv_files(args):
     """Match records between two CSV files."""
+    logger.info(f"Starting CSV matching for files: {args.file1}, {args.file2}")
     # Check if files exist
     if not os.path.isfile(args.file1):
-        print(f"Error: File not found: {args.file1}")
-        return
+        user_message = f"Error: Input file not found: {args.file1}. Please check the file path."
+        logger.error(user_message)
+        print(user_message, file=sys.stderr)
+        sys.exit(2)
     if not os.path.isfile(args.file2):
-        print(f"Error: File not found: {args.file2}")
-        return
+        user_message = f"Error: Input file not found: {args.file2}. Please check the file path."
+        logger.error(user_message)
+        print(user_message, file=sys.stderr)
+        sys.exit(2)
     
     # Create matcher
     matcher = NameMatcher(
@@ -98,21 +107,42 @@ def match_csv_files(args):
         # Save results
         if args.output:
             results.to_csv(args.output, index=False)
-            print(f"Results saved to {args.output}")
+            logger.info(f"Results saved to {args.output}")
         else:
-            # Print results
-            print(f"Found {len(results)} matches:")
-            print(results.to_string())
+            # Log results
+            logger.info(f"Found {len(results)} matches:")
+            logger.info(results.to_string())
+        logger.info("CSV matching finished.")
+    except FileNotFoundError as e:
+        user_message = f"Error: A file operation failed: {e}. Please check file paths and permissions."
+        logger.error(user_message, exc_info=True)
+        print(user_message, file=sys.stderr)
+        sys.exit(2)
+    except pd.errors.EmptyDataError as e:
+        user_message = f"Error: One of the CSV files is empty or invalid: {e}. Please check the file contents."
+        logger.error(user_message, exc_info=True)
+        print(user_message, file=sys.stderr)
+        sys.exit(2)
+    except pd.errors.ParserError as e:
+        user_message = f"Error: Could not parse one of the CSV files: {e}. Ensure it is a valid CSV."
+        logger.error(user_message, exc_info=True)
+        print(user_message, file=sys.stderr)
+        sys.exit(2)
     except Exception as e:
-        print(f"Error matching CSV files: {e}")
+        user_message = f"An unexpected error occurred during CSV file matching: {e}"
+        logger.error(user_message, exc_info=True)
+        print(user_message, file=sys.stderr)
+        sys.exit(1)
 
 
 def match_db_tables(args):
     """Match records between two database tables."""
+    logger.info(f"Starting database table matching for tables: {args.table1}, {args.table2}")
     if not HAS_DB_SUPPORT:
-        print("Error: Database support is not available.")
-        print("Make sure SQLAlchemy and PyMySQL are installed.")
-        return
+        user_message = "Error: Database support is not available. Please ensure SQLAlchemy and a database driver (e.g., PyMySQL) are installed correctly."
+        logger.error(user_message)
+        print(user_message, file=sys.stderr)
+        sys.exit(4)
     
     # Create matcher
     matcher = NameMatcher(
@@ -127,7 +157,7 @@ def match_db_tables(args):
         # Create tables if requested
         if args.create_tables:
             init_db(engine, create_tables=True)
-            print("Database tables created.")
+            logger.info("Database tables created.")
         
         # Parse blocking fields
         blocking_fields = args.blocking_fields.split(",") if args.blocking_fields else None
@@ -145,14 +175,29 @@ def match_db_tables(args):
         
         # Save results to CSV if requested
         if args.output:
-            results.to_csv(args.output, index=False)
-            print(f"Results saved to {args.output}")
+            try:
+                results.to_csv(args.output, index=False)
+                logger.info(f"Results saved to {args.output}")
+            except IOError as e:
+                user_message = f"Error: Could not write results to output file {args.output}: {e}"
+                logger.error(user_message, exc_info=True)
+                print(user_message, file=sys.stderr)
+                sys.exit(2) # File I/O error
         else:
-            # Print results
-            print(f"Found {len(results)} matches:")
-            print(results.to_string())
-    except Exception as e:
-        print(f"Error matching database tables: {e}")
+            # Log results
+            logger.info(f"Found {len(results)} matches:")
+            logger.info(results.to_string())
+        logger.info("Database table matching finished.")
+    except SQLAlchemyError as e: # Specific to database errors
+        user_message = f"A database error occurred: {e}. Please check database connection and table names."
+        logger.error(user_message, exc_info=True)
+        print(user_message, file=sys.stderr)
+        sys.exit(3)
+    except Exception as e: # Catch other unexpected errors
+        user_message = f"An unexpected error occurred during database table matching: {e}"
+        logger.error(user_message, exc_info=True)
+        print(user_message, file=sys.stderr)
+        sys.exit(1)
 
 
 def main():
@@ -259,9 +304,22 @@ def main():
     
     # Run command
     if hasattr(args, "func"):
-        args.func(args)
+        logger.debug(f"Executing command: {args.command} with arguments: {vars(args)}")
+        try:
+            args.func(args)
+            # If the function completes without sys.exit, it's a success for the command execution part
+            logger.info(f"Command '{args.command}' completed successfully.")
+        # Errors handled and exited within args.func (like FileNotFoundError, SQLAlchemyError) won't be caught here.
+        # This top-level exception is for truly unexpected issues in the command functions or arg parsing.
+        except Exception as e:
+            user_message = f"An unexpected critical error occurred while executing command '{args.command}': {e}. Check logs for details."
+            logger.error(user_message, exc_info=True)
+            print(user_message, file=sys.stderr)
+            sys.exit(1) # General critical error
     else:
         parser.print_help()
+        # Consider sys.exit(0) or a specific code if no command is provided, if that's an error.
+        # For now, it prints help and exits with 0 by default.
 
 
 if __name__ == "__main__":

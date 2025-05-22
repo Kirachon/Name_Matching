@@ -1,0 +1,26 @@
+[database]
+host = localhost
+port = 5432
+user = your_db_user
+password = your_db_password
+database = your_db_name
+use_ssl = false
+
+[logging]
+# Log level: CRITICAL, ERROR, WARNING, INFO, DEBUG
+level = INFO
+# Optional: Specify a log file path. If commented out or empty, logs go to console.
+# file = /path/to/your/app.log
+
+[matching]
+# Thresholds for name matching classification
+# Scores >= match_threshold are considered "match"
+# Scores <= non_match_threshold are considered "non-match"
+# Scores between non_match_threshold and match_threshold are "uncertain"
+match_threshold = 0.75
+non_match_threshold = 0.55
+
+# Other application settings can be added below
+# For example:
+# [application]
+# debug = true

@@ -11,8 +11,11 @@ from sqlalchemy import Engine, and_, func, or_, select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+import logging
 from .connection import get_engine, session_scope
 from .models import MatchResult, PersonRecord
+
+logger = logging.getLogger(__name__)
 
 
 def get_records_from_table(
@@ -40,6 +43,9 @@ def get_records_from_table(
     Raises:
         SQLAlchemyError: If a database error occurs
     """
+    logger.info(
+        f"Getting records from table: {table_name}, limit: {limit}, offset: {offset}, filters: {filters}"
+    )
     try:
         with session_scope(engine, connection_key) as session:
             # Build query
@@ -64,8 +70,11 @@ def get_records_from_table(
             result = session.execute(query).scalars().all()
 
             # Convert to dictionaries
-            return [record.to_dict() for record in result]
+            records_to_return = [record.to_dict() for record in result]
+            logger.info(f"Retrieved {len(records_to_return)} records from table {table_name}.")
+            return records_to_return
     except SQLAlchemyError as e:
+        logger.error(f"Error getting records from table {table_name}: {e}", exc_info=True)
         raise SQLAlchemyError(f"Error getting records from table {table_name}: {e}")
 
 
@@ -94,10 +103,16 @@ def get_records_as_dataframe(
     Raises:
         SQLAlchemyError: If a database error occurs
     """
+    logger.info(
+        f"Getting records as DataFrame from table: {table_name}, limit: {limit}, offset: {offset}, filters: {filters}"
+    )
+    # get_records_from_table already logs success/failure
     records = get_records_from_table(
         table_name, engine, connection_key, limit, offset, filters
     )
-    return pd.DataFrame(records)
+    df = pd.DataFrame(records)
+    logger.info(f"Converted {len(df)} records from table {table_name} to DataFrame.")
+    return df
 
 
 def save_records(
@@ -121,6 +136,7 @@ def save_records(
     Raises:
         SQLAlchemyError: If a database error occurs
     """
+    logger.info(f"Saving {len(records)} records to table: {table_name}")
     try:
         with session_scope(engine, connection_key) as session:
             # Convert dictionaries to PersonRecord objects
@@ -133,8 +149,11 @@ def save_records(
             session.flush()  # Flush to get IDs
 
             # Return IDs
-            return [record.id for record in person_records]
+            saved_ids = [record.id for record in person_records]
+            logger.info(f"Saved {len(saved_ids)} records to table {table_name} with IDs: {saved_ids[:10]}...") # Log first 10 IDs
+            return saved_ids
     except SQLAlchemyError as e:
+        logger.error(f"Error saving records to table {table_name}: {e}", exc_info=True)
         raise SQLAlchemyError(f"Error saving records to table {table_name}: {e}")
 
 
@@ -157,6 +176,7 @@ def save_match_results(
     Raises:
         SQLAlchemyError: If a database error occurs
     """
+    logger.info(f"Saving {len(match_results)} match results.")
     try:
         with session_scope(engine, connection_key) as session:
             # Convert dictionaries to MatchResult objects
@@ -169,8 +189,11 @@ def save_match_results(
             session.flush()  # Flush to get IDs
 
             # Return IDs
-            return [result.id for result in match_result_objects]
+            saved_ids = [result.id for result in match_result_objects]
+            logger.info(f"Saved {len(saved_ids)} match results with IDs: {saved_ids[:10]}...") # Log first 10 IDs
+            return saved_ids
     except SQLAlchemyError as e:
+        logger.error(f"Error saving match results: {e}", exc_info=True)
         raise SQLAlchemyError(f"Error saving match results: {e}")
 
 
@@ -205,6 +228,11 @@ def get_match_results(
     Raises:
         SQLAlchemyError: If a database error occurs
     """
+    logger.info(
+        f"Getting match results with filters - record1_id: {record1_id}, record2_id: {record2_id}, "
+        f"classification: {classification}, min_score: {min_score}, max_score: {max_score}, "
+        f"limit: {limit}, offset: {offset}"
+    )
     try:
         with session_scope(engine, connection_key) as session:
             # Build query
@@ -232,8 +260,11 @@ def get_match_results(
             result = session.execute(query).scalars().all()
 
             # Convert to dictionaries
-            return [match_result.to_dict() for match_result in result]
+            results_to_return = [match_result.to_dict() for match_result in result]
+            logger.info(f"Retrieved {len(results_to_return)} match results.")
+            return results_to_return
     except SQLAlchemyError as e:
+        logger.error(f"Error getting match results: {e}", exc_info=True)
         raise SQLAlchemyError(f"Error getting match results: {e}")
 
 
@@ -256,14 +287,17 @@ def delete_match_results(
     Raises:
         SQLAlchemyError: If a database error occurs
     """
+    logger.info(f"Deleting {len(match_result_ids)} match results with IDs: {match_result_ids[:10]}...")
     try:
         with session_scope(engine, connection_key) as session:
             # Delete match results
-            deleted = session.query(MatchResult).filter(
+            deleted_count = session.query(MatchResult).filter(
                 MatchResult.id.in_(match_result_ids)
             ).delete(synchronize_session=False)
-            return deleted
+            logger.info(f"Deleted {deleted_count} match results.")
+            return deleted_count
     except SQLAlchemyError as e:
+        logger.error(f"Error deleting match results: {e}", exc_info=True)
         raise SQLAlchemyError(f"Error deleting match results: {e}")
 
 
@@ -292,9 +326,10 @@ def get_blocking_candidates(
     Raises:
         SQLAlchemyError: If a database error occurs
     """
-    if blocking_fields is None:
-        blocking_fields = ["province_name", "city_name"]
-
+    effective_blocking_fields = blocking_fields if blocking_fields is not None else ["province_name", "city_name"]
+    logger.info(
+        f"Getting blocking candidates for tables: {table1_name}, {table2_name} using fields: {effective_blocking_fields}, limit: {limit}"
+    )
     try:
         with session_scope(engine, connection_key) as session:
             # Aliases for the two tables
@@ -334,8 +369,11 @@ def get_blocking_candidates(
             result = session.execute(query).all()
 
             # Return as list of tuples
-            return [(r[0], r[1]) for r in result]
+            candidates = [(r[0], r[1]) for r in result]
+            logger.info(f"Retrieved {len(candidates)} blocking candidates.")
+            return candidates
     except SQLAlchemyError as e:
+        logger.error(f"Error getting blocking candidates: {e}", exc_info=True)
         raise SQLAlchemyError(f"Error getting blocking candidates: {e}")
 
 
@@ -360,17 +398,26 @@ def execute_raw_query(
     Raises:
         SQLAlchemyError: If a database error occurs
     """
+    logger.info(f"Executing raw query (first 100 chars): {query[:100]}... with params: {params}")
     if params is None:
         params = {}
 
     try:
         with session_scope(engine, connection_key) as session:
             # Execute query
-            result = session.execute(text(query), params)
-
-            # Convert to dictionaries
-            return [dict(row) for row in result]
+            result_proxy = session.execute(text(query), params)
+            
+            # For SELECT queries, process rows. For others, rowcount might be relevant.
+            if result_proxy.returns_rows:
+                rows = [dict(row._mapping) for row in result_proxy] # Use _mapping for newer SQLAlchemy
+                logger.info(f"Raw query returned {len(rows)} rows.")
+                return rows
+            else:
+                logger.info(f"Raw query affected {result_proxy.rowcount} rows.")
+                return [{"affected_rows": result_proxy.rowcount}] # Or appropriate response
+            
     except SQLAlchemyError as e:
+        logger.error(f"Error executing raw query: {e}", exc_info=True)
         raise SQLAlchemyError(f"Error executing raw query: {e}")
 
 
@@ -391,15 +438,19 @@ def get_table_names(
     Raises:
         SQLAlchemyError: If a database error occurs
     """
+    logger.info("Getting all table names from database.")
     try:
         # Get engine if not provided
         if engine is None:
-            engine = get_engine(connection_key=connection_key)
+            engine = get_engine(connection_key=connection_key) # get_engine logs its actions
 
         # Get table names
-        inspector = Engine.inspect(engine)
-        return inspector.get_table_names()
+        inspector = Engine.inspect(engine) # Changed from engine.inspect() to Engine.inspect(engine)
+        table_names = inspector.get_table_names()
+        logger.info(f"Found table names: {table_names}")
+        return table_names
     except SQLAlchemyError as e:
+        logger.error(f"Error getting table names: {e}", exc_info=True)
         raise SQLAlchemyError(f"Error getting table names: {e}")
 
 
@@ -427,10 +478,14 @@ def get_distinct_values(
         SQLAlchemyError: If a database error occurs
         ValueError: If the column does not exist
     """
+    logger.info(
+        f"Getting distinct values for column: {column_name} from table: {table_name}, limit: {limit}"
+    )
     try:
         with session_scope(engine, connection_key) as session:
             # Check if column exists
             if not hasattr(PersonRecord, column_name):
+                logger.error(f"Column {column_name} does not exist in PersonRecord model.")
                 raise ValueError(f"Column {column_name} does not exist in PersonRecord")
 
             # Build query
@@ -448,8 +503,16 @@ def get_distinct_values(
             result = session.execute(query).scalars().all()
 
             # Return as list
-            return list(result)
+            distinct_values = list(result)
+            logger.info(f"Retrieved {len(distinct_values)} distinct values for {column_name} in {table_name}.")
+            return distinct_values
+    except ValueError as ve: # Catch specific ValueError for column existence
+        logger.error(str(ve)) # Already logged by the check
+        raise
     except SQLAlchemyError as e:
+        logger.error(
+            f"Error getting distinct values for {column_name} in {table_name}: {e}", exc_info=True
+        )
         raise SQLAlchemyError(
             f"Error getting distinct values for {column_name} in {table_name}: {e}"
         )
