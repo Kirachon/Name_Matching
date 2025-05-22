@@ -11,6 +11,7 @@ import pytest
 
 from src.name_matcher import NameMatcher
 from src.scorer import MatchClassification
+from src.matcher import jaro_winkler_similarity, damerau_levenshtein_similarity
 
 
 def test_name_matcher_init():
@@ -194,7 +195,7 @@ def test_match_names_with_custom_base_similarity():
     # Using Jaro-Winkler (default)
     matcher_jw = NameMatcher()
     score_jw, _, components_jw = matcher_jw.match_names(name1_str, name2_str)
-    
+
     # Using Damerau-Levenshtein
     matcher_dl = NameMatcher(base_component_similarity_func=damerau_levenshtein_similarity)
     score_dl, _, components_dl = matcher_dl.match_names(name1_str, name2_str)
@@ -212,7 +213,7 @@ def test_match_names_with_custom_base_similarity():
     # Let's test with single token names for simplicity of base_component_similarity_func effect.
     # Parsed and standardized "Jonathan" -> {"first_name": "jonathan"}
     # Parsed and standardized "Johnathan" -> {"first_name": "johnathan"}
-    
+
     # Jaro-Winkler for "jonathan" vs "johnathan"
     jw_sim = jaro_winkler_similarity("jonathan", "johnathan")
     assert components_jw["first_name"] == pytest.approx(jw_sim)
@@ -220,10 +221,10 @@ def test_match_names_with_custom_base_similarity():
     # Damerau-Levenshtein for "jonathan" vs "johnathan"
     dl_sim = damerau_levenshtein_similarity("jonathan", "johnathan") # Expected: 1 - (1/9) = 0.888...
     assert components_dl["first_name"] == pytest.approx(dl_sim)
-    
+
     # Ensure the scores are different, proving different functions were used
     assert components_jw["first_name"] != components_dl["first_name"]
-    
+
     # Check Monge-Elkan scores are still present
     assert "monge_elkan_dl" in components_jw
     assert "monge_elkan_jw" in components_jw

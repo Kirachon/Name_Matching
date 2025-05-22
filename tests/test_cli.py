@@ -17,7 +17,7 @@ def run_cli_command(command_args):
     # Assuming the CLI can be run as a module: python -m src.cli
     # Or directly if it has a shebang and is executable: ./src/cli.py (needs path adjustment)
     # For simplicity, let's try to find the src/cli.py path relative to tests
-    
+
     # This path might need adjustment based on how tests are run (from repo root or tests/ dir)
     # If tests are run from repo root:
     cli_script_path = os.path.join(os.path.dirname(__file__), "..", "src", "cli.py")
@@ -50,7 +50,7 @@ def test_cli_help_output():
     assert "match-names" in stdout
     assert "match-csv" in stdout
     # db support might not be available, so match-db might not be in help
-    # assert "match-db" in stdout 
+    # assert "match-db" in stdout
     assert stderr == ""
 
 def test_cli_no_command():
@@ -68,7 +68,7 @@ def test_cli_match_names_command_basic():
     name1 = "John Doe"
     name2 = "Jon Doe"
     stdout, stderr, exit_code = run_cli_command(["match-names", name1, name2])
-    
+
     assert exit_code == 0
     assert stderr == "" # Expect no errors on stderr for successful run
     assert "Match score:" in stdout
@@ -87,7 +87,7 @@ def test_cli_match_names_command_with_thresholds():
     ])
     assert exit_code == 0
     assert stderr == ""
-    assert "Match score:" in stdout 
+    assert "Match score:" in stdout
     # Classification will depend on these thresholds and the actual score for these names.
 
 # --- Tests for Error Handling ---
@@ -148,14 +148,14 @@ def test_cli_match_db_sqlalchemy_error(mock_get_engine, capsys):
 
     # Prepare arguments for calling main directly
     test_args = ["match-db", "tableA", "tableB"]
-    
+
     with pytest.raises(SystemExit) as e:
         # Patch sys.argv before calling main
         with patch.object(sys, 'argv', [sys.executable] + test_args):
             name_matching_cli.main()
-            
+
     assert e.value.code == 3 # Expected exit code for database error
-    
+
     captured = capsys.readouterr() # capsys works with direct calls
     assert "A database error occurred: Simulated DB connection error" in captured.err
     assert "Please check database connection and table names." in captured.err
@@ -178,7 +178,7 @@ def test_cli_match_csv_empty_file(tmp_path):
 def test_cli_match_csv_parser_error(tmp_path):
     file1 = tmp_path / "malformed.csv"
     # Create a file that might cause a parser error, e.g. inconsistent quotes or delimiters
-    file1.write_text('id,name\n1,"test\n2,another"test\n') 
+    file1.write_text('id,name\n1,"test\n2,another"test\n')
     file2 = tmp_path / "valid2.csv"
     file2.write_text("id,name\n1,test\n")
 
@@ -201,7 +201,7 @@ def test_cli_match_names_unexpected_error(mock_match_names_method, capsys):
     with pytest.raises(SystemExit) as e:
         with patch.object(sys, 'argv', [sys.executable] + test_args):
             name_matching_cli.main()
-            
+
     assert e.value.code == 1
     captured = capsys.readouterr()
     assert "An unexpected critical error occurred" in captured.err
@@ -237,10 +237,10 @@ def ensure_no_default_config_ini(monkeypatch):
     # For now, we'll assume tests that care about specific config states will manage it.
     # This fixture is more of a reminder.
     # A robust way: patch 'os.path.exists' as used by 'load_config' for 'config.ini'.
-    
+
     # Let's try to make `load_config` in `src.config` initially see no file,
     # so CLI commands rely on defaults or env vars unless a test sets up a specific config.
-    
+
     # This patch affects the initial import of src.config if src.cli imports it.
     # It makes it so the default "config.ini" is not found during CLI test setup.
     def mock_path_exists(path):
@@ -285,9 +285,9 @@ def test_cli_match_db_missing_config_and_env(mock_load_config, capsys):
             # The @patch('src.config.CONFIG', None) helps with the INI part.
             # The @patch.dict(os.environ, {}, clear=True) helps with env part.
             name_matching_cli.main()
-            
+
     assert e.value.code == 3 # Expecting a database-related error code
-    
+
     captured = capsys.readouterr()
     assert "A database error occurred" in captured.err # General DB error message
     # The specific error from create_engine might be like "Can't connect to MySQL server on 'None'"
@@ -307,22 +307,22 @@ def test_cli_main_command_debug_logging(mock_match_names_func, caplog):
     # caplog by default captures WARNING and above. To capture DEBUG, we need to set its level.
     # Also, the logger 'src.cli' itself must be set to DEBUG level for messages to be processed.
     # This implies that the logging setup (e.g. from src.config) should allow DEBUG level.
-    
+
     # For this test, let's assume the global logging level is set to DEBUG
     # (e.g., via config.ini or env var for a real run, or by direct setup here for test).
     # We will set the 'src.cli' logger level directly for this test and use caplog.
-    
+
     # Configure src.cli logger to DEBUG and capture with caplog at DEBUG
     cli_logger = logging.getLogger("src.cli")
     original_level = cli_logger.level
     cli_logger.setLevel(logging.DEBUG) # Ensure src.cli logger processes DEBUG messages
-    
+
     # caplog.set_level for the specific logger if needed, or just for the test duration globally
     # For simplicity, if root logger is DEBUG, 'src.cli' will also output if its level is DEBUG.
     # Let's ensure caplog captures DEBUG.
-    
+
     test_args = ["match-names", "log_name1", "log_name2"]
-    
+
     with caplog.at_level(logging.DEBUG, logger="src.cli"):
         with patch.object(sys, 'argv', [sys.executable] + test_args):
             try:
@@ -331,7 +331,7 @@ def test_cli_main_command_debug_logging(mock_match_names_func, caplog):
                 pass # We are interested in logs before any potential exit
 
     assert mock_match_names_func.called # Ensure the command function was called
-    
+
     # Check for the debug log message
     found_log = False
     for record in caplog.records:
@@ -342,4 +342,3 @@ def test_cli_main_command_debug_logging(mock_match_names_func, caplog):
     assert found_log, "CLI did not log the expected DEBUG message for command execution."
 
     cli_logger.setLevel(original_level) # Restore original level
-```

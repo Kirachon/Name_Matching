@@ -44,7 +44,7 @@ def get_db_config() -> dict:
         "database": None,
         "use_ssl": False, # Default to False
     }
-    
+
     ini_config_found = False
     if CONFIG and CONFIG.has_section("database"):
         ini_config_found = True
@@ -70,7 +70,7 @@ def get_db_config() -> dict:
     db_config["user"] = db_config["user"] or os.getenv("DB_USER")
     db_config["password"] = db_config["password"] or os.getenv("DB_PASSWORD")
     db_config["database"] = db_config["database"] or os.getenv("DB_NAME") # Using DB_NAME as per previous observation
-    
+
     # Handle use_ssl, ensuring it's a boolean
     if db_config["use_ssl"] is None: # If not set by INI
         env_use_ssl = os.getenv("DB_USE_SSL", "false")
@@ -78,7 +78,7 @@ def get_db_config() -> dict:
 
     if not ini_config_found:
         print("No [database] section in INI or INI file not loaded. Relying on environment variables for database config.")
-    
+
     return db_config
 
 # Attempt to load configuration when the module is imported.
@@ -141,7 +141,7 @@ if __name__ == '__main__':
         del os.environ["DB_USE_SSL"]
     print("\nTesting finished.")
 else:
-import logging
+    import logging
 
 # --- Logging Configuration ---
 DEFAULT_LOG_LEVEL = "INFO"
@@ -166,7 +166,7 @@ def get_logging_config() -> dict:
 
     # Fallback to environment variable for log level
     log_config["level"] = os.getenv("LOG_LEVEL", log_config["level"]).upper()
-    
+
     return log_config
 
 def setup_logging() -> None:
@@ -188,7 +188,7 @@ def setup_logging() -> None:
     logging.basicConfig(level=numeric_level, format=log_format)
     # Mute noisy libraries if necessary, e.g.:
     # logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
-    
+
     # Test log message
     logger = logging.getLogger(__name__)
     logger.info(f"Logging configured. Level: {log_level_str}")
@@ -216,15 +216,17 @@ def get_matching_thresholds() -> dict:
         thresholds["non_match_threshold"] = CONFIG.getfloat(
             "matching", "non_match_threshold", fallback=DEFAULT_NON_MATCH_THRESHOLD
         )
-        logger.info(f"Matching thresholds loaded from config: {thresholds}")
+        # Note: logger may not be available during module import
+        pass
     else:
-        logger.info(f"Matching thresholds not found in config, using defaults: {thresholds}")
-    
+        # Note: logger may not be available during module import
+        pass
+
     return thresholds
 
 # --- Main script execution / module import actions ---
 
     # Default load attempt when imported as a module
     load_config()
-# Setup logging immediately after loading config
-setup_logging()
+    # Setup logging immediately after loading config
+    setup_logging()
