@@ -72,9 +72,9 @@ def get_connection_string(
 
     final_user = user or config_params.get("user") or "root"
     final_password = password or config_params.get("password") or ""
-    
+
     # Handle use_ssl: function argument takes precedence, then config, then default (False)
-    final_use_ssl = use_ssl 
+    final_use_ssl = use_ssl
     if not use_ssl and config_params.get("use_ssl") is not None: # only check config if use_ssl arg is False (its default)
         final_use_ssl = config_params.get("use_ssl", False)
 
@@ -149,16 +149,6 @@ def get_engine(
     except Exception as e:
         logger.error(f"Failed to create SQLAlchemy engine for key '{connection_key}': {e}", exc_info=True)
         raise # Re-raise the exception after logging
-
-    # Cache the engine
-    _engines[connection_key] = engine
-        poolclass=QueuePool,
-        pool_size=pool_size,
-        max_overflow=max_overflow,
-        pool_timeout=pool_timeout,
-        pool_recycle=pool_recycle,
-        pool_pre_ping=True,  # Check connection validity before using it
-    )
 
     # Cache the engine
     _engines[connection_key] = engine

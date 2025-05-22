@@ -36,7 +36,8 @@ try:
         get_blocking_candidates,
     )
     _has_db_support = True
-except ImportError:
+except ImportError as e:
+    logger.warning(f"Database support not available: {e}")
     _has_db_support = False
 
 
@@ -65,10 +66,10 @@ class NameMatcher:
                                             Defaults to jaro_winkler_similarity.
         """
         config_thresholds = get_matching_thresholds()
-        
+
         self.match_threshold = match_threshold if match_threshold is not None else config_thresholds["match_threshold"]
         self.non_match_threshold = non_match_threshold if non_match_threshold is not None else config_thresholds["non_match_threshold"]
-        
+
         logger.info(f"NameMatcher initialized with match_threshold: {self.match_threshold}, non_match_threshold: {self.non_match_threshold}")
 
         self.base_component_similarity_func = base_component_similarity_func or default_similarity_func
@@ -122,12 +123,12 @@ class NameMatcher:
 
         # Compare name components
         component_scores = compare_name_components(name1_std, name2_std, similarity_function=self.base_component_similarity_func)
-        
+
         # Add Monge-Elkan score using Damerau-Levenshtein as secondary
         # This requires tokenizing the full standardized names
         # For simplicity, we'll re-standardize and tokenize the full names here.
         # A more optimized approach might pass tokenized names around.
-        
+
         # Reconstruct full names for Monge-Elkan tokenization
         # This is a simplified approach; ideally, standardization and tokenization
         # would be more streamlined if Monge-Elkan is a primary strategy.
@@ -139,8 +140,8 @@ class NameMatcher:
 
         if name1_tokens and name2_tokens: # Ensure tokens are not empty
             component_scores["monge_elkan_dl"] = monge_elkan_similarity(
-                name1_tokens, 
-                name2_tokens, 
+                name1_tokens,
+                name2_tokens,
                 damerau_levenshtein_similarity
             )
             component_scores["monge_elkan_jw"] = monge_elkan_similarity(

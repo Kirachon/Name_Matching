@@ -11,6 +11,7 @@ from typing import Dict, List, Set, Tuple
 from numba import jit, cuda
 import numpy as np
 import jellyfish # Keep jellyfish for Damerau-Levenshtein as primary
+from functools import lru_cache
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +68,7 @@ def _jaro_similarity_numba(s1_arr, s2_arr):
                 s2_matches[j] = True
                 matching_chars += 1
                 break
-    
+
     if matching_chars == 0:
         return 0.0
 
@@ -81,7 +82,7 @@ def _jaro_similarity_numba(s1_arr, s2_arr):
             if k < len_s2 and s1_arr[i] != s2_arr[k]: # Check k < len_s2 to prevent index out of bounds
                 transpositions += 1
             k += 1
-            
+
     transpositions //= 2
 
     return (
@@ -118,7 +119,7 @@ def _jaro_similarity_python(s1: str, s2: str) -> float:
                 s2_matches[j] = True
                 matching_chars += 1
                 break
-    
+
     if matching_chars == 0:
         return 0.0
 
@@ -131,7 +132,7 @@ def _jaro_similarity_python(s1: str, s2: str) -> float:
             if s1[i] != s2[k]:
                 transpositions += 1
             k += 1
-            
+
     transpositions //= 2
 
     return (
@@ -153,13 +154,15 @@ def jaro_similarity_dispatch(s1: str, s2: str) -> float:
         logger.warning(f"Numba JIT for _jaro_similarity failed: {e}. Falling back to Python version.")
         return _jaro_similarity_python(s1, s2)
 
+@lru_cache(maxsize=10000)
 def jaro_winkler_similarity(s1: str, s2: str, prefix_weight: float = 0.1) -> float:
     """
     Calculate the Jaro-Winkler similarity between two strings.
     Uses Numba JIT-compiled Jaro similarity if possible.
     """
-    logger.debug(f"jaro_winkler_similarity called with s1: '{s1}', s2: '{s2}', prefix_weight: {prefix_weight}")
-    
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug(f"jaro_winkler_similarity called with s1: '{s1}', s2: '{s2}', prefix_weight: {prefix_weight}")
+
     if not s1 and not s2: # Handle empty strings
         result = 1.0
         logger.debug(f"jaro_winkler_similarity returning (both empty): {result}")
@@ -213,11 +216,12 @@ def damerau_levenshtein_distance_numba(s1_arr, s2_arr):
                                                         # The jellyfish library handles this, so this Numba version is a fallback.
                                                         # For a more accurate D-L, the cost for transposition should be 1.
                                                         # Let's make the transposition cost explicitly 1 for this implementation.
-                d[i,j] = min(d[i,j], d[i-2,j-2] + 1) 
+                d[i,j] = min(d[i,j], d[i-2,j-2] + 1)
 
 
     return d[len_str1, len_str2]
 
+@lru_cache(maxsize=10000)
 def damerau_levenshtein_similarity(s1: str, s2: str) -> float:
     """
     Calculates the Damerau-Levenshtein similarity between two strings.
@@ -257,7 +261,7 @@ def damerau_levenshtein_similarity(s1: str, s2: str) -> float:
 
     max_len = max(len(s1), len(s2))
     # max_len will not be 0 here due to earlier checks for empty strings
-    
+
     similarity = 1.0 - (distance / max_len)
     logger.debug(f"damerau_levenshtein_similarity for '{s1}' vs '{s2}': distance={distance}, max_len={max_len}, similarity={similarity:.4f}")
     return similarity
@@ -284,13 +288,13 @@ def monge_elkan_similarity(name1_parts: List[str], name2_parts: List[str], sim_f
     if not name2_parts: # If name2_parts is empty but name1_parts is not, score is also 0
         logger.debug("Monge-Elkan: name2_parts is empty (name1_parts is not), returning 0.0")
         return 0.0
-        
+
     total_max_similarity = 0.0
     # Filter out empty strings from name1_parts before calculating length for average
     # to avoid division by zero if name1_parts contained only empty strings.
     # However, the problem implies that name1_parts will be a list of actual token strings.
     # The original code already skips empty token1.
-    
+
     actual_name1_tokens_count = 0
     for token1 in name1_parts:
         if not token1: # Skip empty tokens in the first list
@@ -309,7 +313,7 @@ def monge_elkan_similarity(name1_parts: List[str], name2_parts: List[str], sim_f
     if actual_name1_tokens_count == 0: # If all tokens in name1_parts were empty
         logger.debug("Monge-Elkan: name1_parts contained only empty strings after filtering, returning 0.0")
         return 0.0
-        
+
     final_score = total_max_similarity / actual_name1_tokens_count
     logger.debug(f"Monge-Elkan final score: {final_score:.4f}")
     return final_score
@@ -348,7 +352,7 @@ def soundex(s: str) -> str:
 
     # Replace consonants with digits
     s_coded = first_letter # Start with the original first letter
-    
+
     # Code the rest of the string
     for char_idx in range(1, len(s)):
         char = s[char_idx]
@@ -366,11 +370,11 @@ def soundex(s: str) -> str:
         elif char == "R":
             code = "6"
         # Vowels (AEIOU) and H, W, Y are dropped unless they are the first letter (handled by s_coded init)
-        
+
         # Add code if different from previous and not empty
         if code and (len(s_coded) < 2 or code != s_coded[-1]):
              s_coded += code
-    
+
     # Remove the first letter's code if it was a vowel, then re-add the letter
     # This step is to handle cases where the first letter is a vowel.
     # The Soundex rule is: Retain the first letter of the name, and drop all other occurrences of a, e, i, o, u, y, h, w.
@@ -406,7 +410,7 @@ def soundex(s: str) -> str:
         'BFPV': '1', 'CGJKQSXZ': '2', 'DT': '3',
         'L': '4', 'MN': '5', 'R': '6'
     }
-    
+
     for char_code_map, digit in soundex_map.items():
         for char_val in char_code_map:
             s_upper = s_upper.replace(char_val, digit)
@@ -417,12 +421,12 @@ def soundex(s: str) -> str:
             if not coded_chars or (coded_chars[-1] != char):
                 coded_chars.append(char)
         # Rule 2 (implicitly): Vowels, H, W, Y (and now non-coded consonants) are ignored here
-    
+
     # Rule 5 is implicitly handled by not adding '0's from rule 2 to coded_chars
     # Rule 6: Pad with zeros and take first four
     coded_string = "".join(coded_chars)
     coded_string = (coded_string + "000")[:4]
-    
+
     logger.debug(f"soundex for '{s}' (original) -> result: {coded_string}")
     return coded_string
 
@@ -494,14 +498,14 @@ def token_sort_similarity(s1: str, s2: str) -> float:
         Similarity score between 0 and 1
     """
     logger.debug(f"token_sort_similarity called with s1: '{s1}', s2: '{s2}'")
-    
+
     if not s1 and not s2:
         logger.debug("token_sort_similarity: both empty, returning 1.0")
         return 1.0
     if not s1 or not s2:
         logger.debug("token_sort_similarity: one empty, returning 0.0")
         return 0.0
-        
+
     # Sort tokens
     sorted_s1 = " ".join(sorted(s1.lower().split()))
     sorted_s2 = " ".join(sorted(s2.lower().split()))
@@ -516,10 +520,14 @@ def token_sort_similarity(s1: str, s2: str) -> float:
 def compare_name_components(
     name1_components: Dict[str, str],
     name2_components: Dict[str, str],
-    similarity_function 
+    similarity_function
 ) -> Dict[str, float]:
     """
     Compare individual components of two names using a specified similarity function.
+
+    PERFORMANCE NOTE: This function uses dictionary keys for compatibility.
+    For high-performance applications, consider using the optimized version
+    with numeric indices in optimized_data_structures.py
 
     Args:
         name1_components: Components of the first name
@@ -533,7 +541,7 @@ def compare_name_components(
 
     scores = {}
     common_keys = set(name1_components.keys()).union(set(name2_components.keys()))
-    
+
     for key in ["first_name", "middle_name", "last_name"]: # Ensure these are always present even if None
         val1 = name1_components.get(key, "")
         val2 = name2_components.get(key, "")
@@ -559,7 +567,7 @@ def compare_name_components(
         name1_full_for_sort,
         name2_full_for_sort
     )
-    
+
     logger.debug(f"compare_name_components returning scores: {scores}")
     return scores
 
@@ -579,7 +587,7 @@ def levenshtein_gpu_device(s1_arr, s2_arr, d_arr):
     # and careful handling of shared memory if used.
     # For now, let's assume a conceptual single-threaded execution on device for clarity.
     # This is NOT a runnable/efficient GPU kernel as is.
-    
+
     # A more realistic Numba CUDA approach for string distance might involve:
     # 1. A kernel that processes one pair of strings per thread block or thread.
     # 2. Strings pre-padded or handled with care for varying lengths.
@@ -591,12 +599,12 @@ def levenshtein_gpu_device(s1_arr, s2_arr, d_arr):
     # A real implementation would use threadIdx.x, blockIdx.x, etc.
     # and likely operate on a flattened representation of the DP table
     # or use the two-row optimization.
-    
+
     # This is a conceptual placeholder and would not run efficiently as-is.
     # A full GPU Levenshtein would be more involved.
     # For demonstration, let's assume this function is called by a kernel
     # that handles the array setup and thread distribution.
-    
+
     # Example of a single cell calculation (conceptual)
     # i, j = cuda.grid(2) # Example thread indexing
     # if i < d_arr.shape[0] and j < d_arr.shape[1]:
@@ -636,27 +644,27 @@ def levenshtein_similarity_gpu_host(s1_str: str, s2_str: str) -> float:
     # 2. Allocate memory on GPU and copy data
     s1_gpu = cuda.to_device(s1_arr_host)
     s2_gpu = cuda.to_device(s2_arr_host)
-    
+
     # DP table for Levenshtein, size (len(s1)+1) x (len(s2)+1)
     # For a real GPU kernel, this would be managed carefully.
     # This is a simplified placeholder.
     # For actual pairwise comparisons, you'd likely launch many kernels.
     # For this example, we'll simulate calculating one distance.
-    
+
     # If we were to implement a full Levenshtein on GPU:
     # dp_gpu = cuda.device_array((len(s1_arr_host) + 1, len(s2_arr_host) + 1), dtype=np.int32)
     # Initialize first row and col of dp_gpu
     # Define kernel launch configuration (blocks, threads)
     # Call levenshtein_gpu_device[blocks_per_grid, threads_per_block](s1_gpu, s2_gpu, dp_gpu)
     # distance = dp_gpu[len(s1_arr_host), len(s2_arr_host)].copy_to_host()
-    
+
     # For this conceptual example, let's just say it would compute the distance.
     # Since implementing a full, efficient GPU Levenshtein here is too complex,
     # we'll acknowledge the concept and for actual execution,
     # it would fall back or use a CPU version for now.
     logger.info("Conceptual GPU path for Levenshtein. Actual GPU kernel not fully implemented here for brevity.")
     logger.warning("levenshtein_similarity_gpu_host is conceptual and falls back to CPU jellyfish.")
-    
+
     try:
         distance = jellyfish.levenshtein_distance(s1_str, s2_str)
     except Exception as e:
@@ -665,4 +673,3 @@ def levenshtein_similarity_gpu_host(s1_str: str, s2_str: str) -> float:
     max_len = max(len(s1_str), len(s2_str))
     if max_len == 0: return 1.0 if not s1_str and not s2_str else 0.0
     return 1.0 - (distance / max_len)
-```

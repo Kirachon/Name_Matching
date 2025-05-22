@@ -19,7 +19,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import relationship
 
 # Base class for all models
@@ -29,68 +29,68 @@ Base = declarative_base()
 class PersonRecord(Base):
     """
     Model for a person record in the database.
-    
+
     This model can be used for both table sets by specifying the table_name.
     """
-    
+
     __tablename__ = "person_records"
-    
+
     # Allow using this model for different tables
     __table_args__ = {"extend_existing": True}
-    
+
     # Primary key
     id = Column(Integer, primary_key=True, autoincrement=True)
-    
+
     # Original record ID from the source table
     hh_id = Column(String(50), nullable=False, index=True)
-    
+
     # Name fields
     first_name = Column(String(100), nullable=False, index=True)
     middle_name = Column(String(100), nullable=True)
     last_name = Column(String(100), nullable=False, index=True)
-    
+
     # Original middle_name_last_name field
     middle_name_last_name = Column(String(200), nullable=True)
-    
+
     # Additional fields
     birthdate = Column(Date, nullable=True, index=True)
     province_name = Column(String(100), nullable=True, index=True)
     city_name = Column(String(100), nullable=True, index=True)
     barangay_name = Column(String(100), nullable=True, index=True)
-    
+
     # Metadata
     source_table = Column(String(100), nullable=False, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
+
     # Relationships
     match_results_as_record1 = relationship(
-        "MatchResult", 
+        "MatchResult",
         foreign_keys="MatchResult.record1_id",
         back_populates="record1"
     )
     match_results_as_record2 = relationship(
-        "MatchResult", 
+        "MatchResult",
         foreign_keys="MatchResult.record2_id",
         back_populates="record2"
     )
-    
+
     def __repr__(self) -> str:
         return (
             f"<PersonRecord(id={self.id}, "
             f"hh_id='{self.hh_id}', "
             f"name='{self.first_name} {self.last_name}')>"
         )
-    
+
     @classmethod
     def from_dict(cls, data: dict, source_table: str) -> "PersonRecord":
         """
         Create a PersonRecord from a dictionary.
-        
+
         Args:
             data: Dictionary with record data
             source_table: Name of the source table
-            
+
         Returns:
             PersonRecord instance
         """
@@ -101,7 +101,7 @@ class PersonRecord(Base):
                 birthdate_val = datetime.strptime(birthdate_val, "%Y-%m-%d").date()
             except ValueError:
                 birthdate_val = None
-        
+
         # Create record
         return cls(
             hh_id=data.get("hh_id", str(data.get("id", ""))),
@@ -115,18 +115,18 @@ class PersonRecord(Base):
             barangay_name=data.get("barangay_name", ""),
             source_table=source_table,
         )
-    
+
     def to_dict(self) -> dict:
         """
         Convert the record to a dictionary.
-        
+
         Returns:
             Dictionary representation of the record
         """
         birthdate_str = None
         if self.birthdate:
             birthdate_str = self.birthdate.strftime("%Y-%m-%d")
-            
+
         return {
             "id": self.id,
             "hh_id": self.hh_id,
@@ -144,20 +144,20 @@ class PersonRecord(Base):
 
 class MatchResult(Base):
     """Model for storing match results between two records."""
-    
+
     __tablename__ = "match_results"
-    
+
     # Primary key
     id = Column(Integer, primary_key=True, autoincrement=True)
-    
+
     # Foreign keys to the matched records
     record1_id = Column(Integer, ForeignKey("person_records.id"), nullable=False)
     record2_id = Column(Integer, ForeignKey("person_records.id"), nullable=False)
-    
+
     # Match details
     score = Column(Float, nullable=False)
     classification = Column(String(20), nullable=False)  # match, non_match, manual_review
-    
+
     # Component scores
     score_first_name = Column(Float, nullable=True)
     score_middle_name = Column(Float, nullable=True)
@@ -165,31 +165,31 @@ class MatchResult(Base):
     score_full_name_sorted = Column(Float, nullable=True)
     score_birthdate = Column(Float, nullable=True)
     score_geography = Column(Float, nullable=True)
-    
+
     # Additional information
     notes = Column(Text, nullable=True)
-    
+
     # Metadata
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
+
     # Relationships
     record1 = relationship(
-        "PersonRecord", 
+        "PersonRecord",
         foreign_keys=[record1_id],
         back_populates="match_results_as_record1"
     )
     record2 = relationship(
-        "PersonRecord", 
+        "PersonRecord",
         foreign_keys=[record2_id],
         back_populates="match_results_as_record2"
     )
-    
+
     # Ensure we don't have duplicate matches
     __table_args__ = (
         UniqueConstraint("record1_id", "record2_id", name="uix_match_result"),
     )
-    
+
     def __repr__(self) -> str:
         return (
             f"<MatchResult(id={self.id}, "
@@ -198,15 +198,15 @@ class MatchResult(Base):
             f"score={self.score}, "
             f"classification='{self.classification}')>"
         )
-    
+
     @classmethod
     def from_dict(cls, data: dict) -> "MatchResult":
         """
         Create a MatchResult from a dictionary.
-        
+
         Args:
             data: Dictionary with match result data
-            
+
         Returns:
             MatchResult instance
         """
@@ -223,11 +223,11 @@ class MatchResult(Base):
             score_geography=data.get("score_geography"),
             notes=data.get("notes"),
         )
-    
+
     def to_dict(self) -> dict:
         """
         Convert the match result to a dictionary.
-        
+
         Returns:
             Dictionary representation of the match result
         """
