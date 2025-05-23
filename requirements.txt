@@ -22,3 +22,31 @@ numba>=0.57.0 # For JIT compilation and GPU acceleration
 PyQt5==5.15.9
 QDarkStyle==3.1.0
 openpyxl==3.1.2  # For Excel export
+
+# API and Web dependencies
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+pydantic==2.5.0
+python-multipart==0.0.6
+
+# Authentication and Security
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+
+# Caching and Performance
+redis==5.0.1
+aioredis==2.0.1
+
+# Monitoring and Metrics
+prometheus-client==0.19.0
+
+# Async processing
+aiofiles==23.2.1
+celery==5.3.4
+
+# Enhanced CLI
+click==8.1.7
+rich==13.7.0
+
+# Containerization support
+python-dotenv==1.0.0  # Already included but ensuring latest
